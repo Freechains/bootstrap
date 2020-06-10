@@ -30,8 +30,12 @@ class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
     private var busy  = false
     private val path  = path
     private val chain = chain
+    private val port  = port
     private var store = Store(mutableListOf(), mutableListOf())
 
+    private fun host () : String {
+        return "--host=localhost:${this.port}"
+    }
     private fun toJson (): String {
         @OptIn(UnstableDefault::class)
         return Json(JsonConfiguration(prettyPrint=true)).stringify(Store.serializer(), this.store)
@@ -56,7 +60,7 @@ class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
         f(this.store)
         val json = this.toJson()
         thread {
-            main_cli_assert(arrayOf("chain", this.chain, "post", "inline", json))
+            main_cli_assert(arrayOf(host(), "chain", this.chain, "post", "inline", json))
         }
     }
 
@@ -70,8 +74,8 @@ class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
             this.store.peers
                 .map {
                     thread {
-                        main_cli(arrayOf("peer", it, "send", chain.first))
-                        main_cli(arrayOf("peer", it, "recv", chain.first))
+                        main_cli(arrayOf(host(), "peer", it, "send", chain.first))
+                        main_cli(arrayOf(host(), "peer", it, "recv", chain.first))
                     }
                 }
                 .forEach { it.join() }
@@ -87,7 +91,7 @@ class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
 
         thread {
             // get last head
-            val head = main_cli_assert(arrayOf("chain", chain, "heads", "all"))
+            val head = main_cli_assert(arrayOf(host(), "chain", chain, "heads", "all"))
             assert_(!head.contains(' ')) { "multiple heads" }
 
             // get last store
@@ -95,7 +99,7 @@ class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
                 if (head.startsWith("0_")) {
                     Store(mutableListOf(), mutableListOf())
                 } else {
-                    main_cli_assert(arrayOf("chain", chain, "get", "payload", head)).jsonToStore()
+                    main_cli_assert(arrayOf(host(), "chain", chain, "get", "payload", head)).jsonToStore()
                 }
 
             // join all chains
@@ -103,7 +107,7 @@ class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
                 .map {
                     thread {
                         main_cli (
-                            arrayOf("chains", "join", it.first)
+                            arrayOf(host(), "chains", "join", it.first)
                                 .plus (if (it.second==null) emptyArray() else arrayOf(it.second!!))
                         )
                     }

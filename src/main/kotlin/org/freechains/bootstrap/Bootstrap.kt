@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.UnstableDefault
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonConfiguration
+import org.freechains.cli.main_cli
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -18,31 +19,26 @@ data class Store (
     val chains : MutableList<Pair<String,HKey?>>
 )
 
+fun String.jsonToStore (): Store {
+    @OptIn(UnstableDefault::class)
+    return Json(JsonConfiguration(prettyPrint=true)).parse(Store.serializer(), this)
+}
+
 class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
     val cbs: MutableSet<(Store)->Unit> = mutableSetOf()
 
+    private var busy  = false
+    private val path  = path
     private val chain = chain
-    private var data  = Store(mutableListOf(), mutableListOf())
+    private var store = Store(mutableListOf(), mutableListOf())
 
-    private fun json2data (json: String) {
+    private fun toJson (): String {
         @OptIn(UnstableDefault::class)
-        this.data = Json(JsonConfiguration(prettyPrint=true)).parse(Store.serializer(), json)
-    }
-    private fun data2json (): String {
-        @OptIn(UnstableDefault::class)
-        return Json(JsonConfiguration(prettyPrint=true)).stringify(Store.serializer(), this.data)
+        return Json(JsonConfiguration(prettyPrint=true)).stringify(Store.serializer(), this.store)
     }
 
     init {
-        val file = File(path)
-        if (!file.exists()) {
-            File(path).writeText(this.data2json())
-        } else {
-            this.json2data(file.readText())
-        }
         this.update()
-
-        // background listen
         thread {
             val socket = Socket("localhost", port)
             val writer = DataOutputStream(socket.getOutputStream()!!)
@@ -55,26 +51,10 @@ class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
         }
     }
 
-    // update data and invoke callbacks
-    fun update () {
-        thread {
-            val head = main_cli_assert(arrayOf("chain", chain, "heads", "all")).let {
-                val heads = it.split(' ')
-                assert_(heads.size == 1)
-                heads[0]
-            }
-            val pay = main_cli_assert(arrayOf("chain", chain, "get", "payload", head))
-            synchronized (this) {
-                this.json2data(pay)
-                this.cbs.forEach { it(this.data) }
-            }
-        }
-    }
-
     @Synchronized
     fun write (f: (Store)->Unit) {
-        f(this.data)
-        val json = this.data2json()
+        f(this.store)
+        val json = this.toJson()
         thread {
             main_cli_assert(arrayOf("chain", this.chain, "post", "inline", json))
         }
@@ -82,6 +62,63 @@ class Bootstrap (path: String, chain: String, port: Int = PORT_8330) {
 
     @Synchronized
     fun <T> read (f: (Store)->T) : T {
-        return f(this.data)
+        return f(this.store)
+    }
+
+    fun sync () {
+        for (chain in this.store.chains) {
+            this.store.peers
+                .map {
+                    thread {
+                        main_cli(arrayOf("peer", it, "send", chain.first))
+                        main_cli(arrayOf("peer", it, "recv", chain.first))
+                    }
+                }
+                .forEach { it.join() }
+        }
+    }
+
+    // read bootstrap chain, update store, join chains, notify listeners
+    fun update () {
+        synchronized (this) {
+            assert_(!this.busy) { "bootstrap is busy" }
+            this.busy = true
+        }
+
+        thread {
+            // get last head
+            val head = main_cli_assert(arrayOf("chain", chain, "heads", "all"))
+            assert_(!head.contains(' ')) { "multiple heads" }
+
+            // get last store
+            val store =
+                if (head.startsWith("0_")) {
+                    Store(mutableListOf(), mutableListOf())
+                } else {
+                    main_cli_assert(arrayOf("chain", chain, "get", "payload", head)).jsonToStore()
+                }
+
+            // join all chains
+            store.chains
+                .map {
+                    thread {
+                        main_cli (
+                            arrayOf("chains", "join", it.first)
+                                .plus (if (it.second==null) emptyArray() else arrayOf(it.second!!))
+                        )
+                    }
+                }
+                .forEach { it.join() }
+
+            // save store and notify listeners
+            synchronized (this) {
+                this.store = store
+                File(this.path).writeText(this.toJson())
+                this.cbs.forEach { it(this.store) }
+                this.busy = false
+            }
+
+            this.sync()
+        }
     }
 }

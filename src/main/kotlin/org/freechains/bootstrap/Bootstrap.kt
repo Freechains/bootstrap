@@ -7,31 +7,31 @@ import org.freechains.common.PORT_8330
 import org.freechains.common.listSplit
 import java.io.File
 
-class Bootstrap (root: String, host: String = "localhost:$PORT_8330") {
+class Bootstrap (root: String, port: Int = PORT_8330) {
     val chains: MutableSet<Chain>
 
-    private val root  = root
-    private val host  = host
-    private val hhost = "--host=$host"
+    private val root = root
+    private val port = port
+    private val host = "--host=localhost:$port"
 
     init {
         this.chains = File(root)
             .list()!!
             .filter { f -> f.endsWith(".bootstrap") }
             .map    { f -> f.dropLast(".bootstrap".length) }
-            .map    { Chain(root, it, host) }
+            .map    { Chain(root, it, port) }
             .toMutableSet()
     }
 
     fun boot (peer: String, chain: String, key: HKey) {
         assert(chain.startsWith("\$bootstrap."))
-        main_cli(arrayOf(hhost, "chains", "join", chain, key))
-        this.chains.add(Chain(root, chain, this.host))
-        main_cli_assert(arrayOf(hhost, "peer", peer, "recv", chain))
+        main_cli(arrayOf(host, "chains", "join", chain, key))
+        this.chains.add(Chain(root, chain, this.port))
+        main_cli_assert(arrayOf(host, "peer", peer, "recv", chain))
     }
 
     fun query (peer: String): List<String> {
-        return main_cli_assert(arrayOf(hhost, "peer", peer, "list"))
+        return main_cli_assert(arrayOf(host, "peer", peer, "list"))
             .listSplit()
             .filter { it.startsWith("\$bootstrap.") }
     }

@@ -24,13 +24,13 @@ fun String.jsonToStore (): Store {
     return Json(JsonConfiguration(prettyPrint=true)).parse(Store.serializer(), this)
 }
 
-class Chain (root: String, chain: String, host: String = "localhost:$PORT_8330") {
+class Chain (root: String, chain: String, port: Int = PORT_8330) {
     val cbs: MutableSet<(Store)->Unit> = mutableSetOf()
 
     private var busy  = false
     private val path  = root + "/" + chain + ".bootstrap"
     private val chain = chain
-    private val hhost = "--host=$host"
+    private val host  = "--host=localhost:$port"
     private var store = Store(mutableListOf(), mutableListOf())
 
     private fun toJson (): String {
@@ -42,8 +42,7 @@ class Chain (root: String, chain: String, host: String = "localhost:$PORT_8330")
         assert(chain.startsWith("\$bootstrap."))
         this.update()
         thread {
-            val (addr,port) = host.to_Addr_Port()
-            val socket = Socket(addr,port)
+            val socket = Socket("localhost", port)
             val writer = DataOutputStream(socket.getOutputStream()!!)
             val reader = DataInputStream(socket.getInputStream()!!)
             writer.writeLineX("$PRE chain $chain listen")
@@ -59,7 +58,7 @@ class Chain (root: String, chain: String, host: String = "localhost:$PORT_8330")
         f(this.store)
         val json = this.toJson()
         thread {
-            main_cli_assert(arrayOf(hhost, "chain", this.chain, "post", "inline", json))
+            main_cli_assert(arrayOf(host, "chain", this.chain, "post", "inline", json))
         }
     }
 
@@ -73,8 +72,8 @@ class Chain (root: String, chain: String, host: String = "localhost:$PORT_8330")
             this.store.peers
                 .map {
                     thread {
-                        main_cli(arrayOf(hhost, "peer", it, "send", chain.first))
-                        main_cli(arrayOf(hhost, "peer", it, "recv", chain.first))
+                        main_cli(arrayOf(host, "peer", it, "send", chain.first))
+                        main_cli(arrayOf(host, "peer", it, "recv", chain.first))
                     }
                 }
                 .forEach { it.join() }
@@ -90,7 +89,7 @@ class Chain (root: String, chain: String, host: String = "localhost:$PORT_8330")
 
         thread {
             // get last head
-            val head = main_cli_assert(arrayOf(hhost, "chain", chain, "heads", "all"))
+            val head = main_cli_assert(arrayOf(host, "chain", chain, "heads", "all"))
             assert_(!head.contains(' ')) { "multiple heads" }
 
             // get last store
@@ -98,7 +97,7 @@ class Chain (root: String, chain: String, host: String = "localhost:$PORT_8330")
                 if (head.startsWith("0_")) {
                     Store(mutableListOf(), mutableListOf())
                 } else {
-                    main_cli_assert(arrayOf(hhost, "chain", chain, "get", "payload", head)).jsonToStore()
+                    main_cli_assert(arrayOf(host, "chain", chain, "get", "payload", head)).jsonToStore()
                 }
 
             // join all chains
@@ -106,7 +105,7 @@ class Chain (root: String, chain: String, host: String = "localhost:$PORT_8330")
                 .map {
                     thread {
                         main_cli (
-                            arrayOf(hhost, "chains", "join", it.first)
+                            arrayOf(host, "chains", "join", it.first)
                                 .plus (if (it.second==null) emptyArray() else arrayOf(it.second!!))
                         )
                     }

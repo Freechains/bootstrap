@@ -11,20 +11,22 @@ class Bootstrap (root: String, host: String = "localhost:$PORT_8330") {
     val chains: MutableSet<Chain>
 
     private val root  = root
-    private val host  = "--host=$host"
+    private val host  = host
     private val hhost = "--host=$host"
 
     init {
         this.chains = File(root)
-            .listFiles { f, _ -> f.extension == ".bootstrap" }!!
-            .map { Chain(root, it.nameWithoutExtension, host) }
+            .list()!!
+            .filter { f -> f.endsWith(".bootstrap") }
+            .map    { f -> f.dropLast(".bootstrap".length) }
+            .map    { Chain(root, it, host) }
             .toMutableSet()
     }
 
     fun boot (peer: String, chain: String, key: HKey) {
         assert(chain.startsWith("\$bootstrap."))
         main_cli(arrayOf(hhost, "chains", "join", chain, key))
-        this.chains.add(Chain(root, chain, host))
+        this.chains.add(Chain(root, chain, this.host))
         main_cli_assert(arrayOf(hhost, "peer", peer, "recv", chain))
     }
 

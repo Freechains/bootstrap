@@ -39,9 +39,10 @@ class Chain (root: String, chain: String, host: String = "localhost:$PORT_8330")
     }
 
     init {
+        assert(chain.startsWith("\$bootstrap."))
         this.update()
         thread {
-            val (addr,port) = host.hostSplit()
+            val (addr,port) = host.to_Addr_Port()
             val socket = Socket(addr,port)
             val writer = DataOutputStream(socket.getOutputStream()!!)
             val reader = DataInputStream(socket.getInputStream()!!)

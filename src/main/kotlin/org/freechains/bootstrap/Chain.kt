@@ -27,7 +27,7 @@ fun String.jsonToStore (): Store {
 class Chain (root: String, chain: String, port: Int = PORT_8330) {
     val cbs: MutableSet<(Store)->Unit> = mutableSetOf()
 
-    private var busy  = false
+    private var work  = Pair(false,false)   // working, doagain
     private val path  = root + "/" + chain + ".bootstrap"
     private val chain = chain
     private val host  = "--host=localhost:$port"
@@ -40,7 +40,7 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
 
     init {
         assert(chain.startsWith("\$bootstrap."))
-        this.update()
+        thread { this.update() }
         thread {
             val socket = Socket("localhost", port)
             val writer = DataOutputStream(socket.getOutputStream()!!)
@@ -48,7 +48,7 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
             writer.writeLineX("$PRE chain $chain listen")
             while (true) {
                 reader.readLineX()
-                this.update()
+                thread { this.update() }
             }
         }
     }
@@ -67,60 +67,72 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
         return f(this.store)
     }
 
-    fun sync () {
-        for (chain in this.store.chains) {
-            this.store.peers
-                .map {
-                    thread {
-                        main_cli(arrayOf(host, "peer", it, "send", chain.first))
-                        main_cli(arrayOf(host, "peer", it, "recv", chain.first))
-                    }
-                }
-                .forEach { it.join() }
-        }
-    }
-
     // read bootstrap chain, update store, join chains, notify listeners
     fun update () {
         synchronized (this) {
-            assert_(!this.busy) { "bootstrap is busy" }
-            this.busy = true
+            if (this.work.first) {
+                this.work = Pair(true,true)
+                return
+            }
         }
 
-        thread {
-            // get last head
-            val head = main_cli_assert(arrayOf(host, "chain", chain, "heads", "all"))
-            assert_(!head.contains(' ')) { "multiple heads" }
+        // get last head
+        val head = main_cli_assert(arrayOf(host, "chain", chain, "heads", "all"))
+        assert_(!head.contains(' ')) { "multiple heads" }
 
-            // get last store
-            val store =
-                if (head.startsWith("0_")) {
-                    Store(mutableListOf(), mutableListOf())
-                } else {
-                    main_cli_assert(arrayOf(host, "chain", chain, "get", "payload", head)).jsonToStore()
-                }
-
-            // join all chains
-            store.chains
-                .map {
-                    thread {
-                        main_cli (
-                            arrayOf(host, "chains", "join", it.first)
-                                .plus (if (it.second==null) emptyArray() else arrayOf(it.second!!))
-                        )
-                    }
-                }
-                .forEach { it.join() }
-
-            // save store and notify listeners
-            synchronized (this) {
-                this.store = store
-                File(this.path).writeText(this.toJson())
-                this.cbs.forEach { it(this.store) }
-                this.busy = false
+        // get last store
+        val store =
+            if (head.startsWith("0_")) {
+                Store(mutableListOf(), mutableListOf())
+            } else {
+                main_cli_assert(arrayOf(host, "chain", chain, "get", "payload", head)).jsonToStore()
             }
 
-            this.sync()
+        // join all chains
+        store.chains
+            .map {
+                thread {
+                    println(">>> JOIN: ${it.first}")
+                    main_cli (
+                        arrayOf(host, "chains", "join", it.first)
+                            .plus (if (it.second==null) emptyArray() else arrayOf(it.second!!))
+                    )
+                }
+            }
+            .forEach { it.join() }
+
+        // save store and notify listeners
+        synchronized (this) {
+            this.store = store
+            File(this.path).writeText(this.toJson())
+            this.cbs.forEach { it(this.store) }
         }
+
+        // sync
+        thread {
+            // each action in sequence (receive then send)
+            for (action in arrayOf("recv","send")) {
+                // all peers in parallel
+                for (peer in store.peers) {
+                    thread {
+                        for (chain in store.chains) {
+                            println(">>> $action ${chain.first} $host->$peer")
+                            main_cli(arrayOf(host, "peer", peer, action, chain.first))
+                        }
+                    }
+                }
+                // wait socket timeout to go to next action
+                Thread.sleep(T5S_socket*3/2)
+            }
+        }
+
+        synchronized (this) {
+            val repeat = this.work.second
+            this.work = Pair(false,false)
+            if (repeat) {
+                return this.update()
+            }
+        }
+
     }
 }

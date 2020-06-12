@@ -30,7 +30,7 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
     private var work  = Pair(false,false)   // working, doagain
     private val path  = root + "/" + chain + ".bootstrap"
     private val chain = chain
-    private val host  = "--host=localhost:$port"
+    private val port_ = "--port=$port"
     private var store = Store(mutableListOf(), mutableListOf())
 
     private fun toJson (): String {
@@ -58,7 +58,7 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
         f(this.store)
         val json = this.toJson()
         thread {
-            main_cli_assert(arrayOf(host, "chain", this.chain, "post", "inline", json))
+            main_cli_assert(arrayOf(port_, "chain", this.chain, "post", "inline", json))
         }
     }
 
@@ -77,7 +77,7 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
         }
 
         // get last head
-        val head = main_cli_assert(arrayOf(host, "chain", chain, "heads", "all"))
+        val head = main_cli_assert(arrayOf(port_, "chain", chain, "heads", "all"))
         assert_(!head.contains(' ')) { "multiple heads" }
 
         // get last store
@@ -85,16 +85,16 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
             if (head.startsWith("0_")) {
                 Store(mutableListOf(), mutableListOf())
             } else {
-                main_cli_assert(arrayOf(host, "chain", chain, "get", "payload", head)).jsonToStore()
+                main_cli_assert(arrayOf(port_, "chain", chain, "get", "payload", head)).jsonToStore()
             }
 
         // join all chains
         store.chains
             .map {
                 thread {
-                    println(">>> JOIN: ${it.first}")
+                    //println(">>> JOIN: ${it.first}")
                     main_cli (
-                        arrayOf(host, "chains", "join", it.first)
+                        arrayOf(port_, "chains", "join", it.first)
                             .plus (if (it.second==null) emptyArray() else arrayOf(it.second!!))
                     )
                 }
@@ -116,8 +116,8 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
                 for (peer in store.peers) {
                     thread {
                         for (chain in store.chains) {
-                            println(">>> $action ${chain.first} $host->$peer")
-                            main_cli(arrayOf(host, "peer", peer, action, chain.first))
+                            //println(">>> $action ${chain.first} $port_->$peer")
+                            main_cli(arrayOf(port_, "peer", peer, action, chain.first))
                         }
                     }
                 }

@@ -56,11 +56,10 @@ fun main_bootstrap (args: Array<String>) : Pair<Boolean,String> {
             "init" -> {
                 assert_(cmds.size == 4)
                 val chain = cmds[2]
-                val host = "--host=localhost:$port"
                 assert_(chain.startsWith("\$bootstrap."))
-                main_cli(arrayOf(host, "chains", "join", chain, cmds[3]))
+                main_cli(arrayOf(port_, "chains", "join", chain, cmds[3]))
                 Chain(path, chain, port)
-                main_cli_assert(arrayOf(host, "peer", cmds[1], "recv", chain))
+                main_cli_assert(arrayOf(port_, "peer", cmds[1], "recv", chain))
                 while (true);
                 Pair(true, "")
             }

@@ -12,8 +12,8 @@ val help = """
 freechains-bootstrap $VERSION
 
 Usage:
-    freechains-bootstrap init <peer> <chain> <shared>
-    freechains-bootstrap start
+    freechains-bootstrap local <chain>
+    freechains-bootstrap remote <peer> <chain> <shared>
 
 Options:
     --help          displays this help
@@ -40,23 +40,19 @@ fun main_bootstrap (args: Array<String>) : Pair<Boolean,String> {
         val port = opts["--port"]?.toInt() ?: PORT_8330
         val port_ = "--port=$port"
 
-        @Suppress("UNREACHABLE_CODE")
         val path = main_host_assert(arrayOf(port_, "path"))
+        @Suppress("UNREACHABLE_CODE")
         when (cmds[0]) {
-            "start" -> {
-                assert_(cmds.size == 1)
-                val chain = File(path)
-                    .list()!!
-                    .first { f -> f.endsWith(".bootstrap") }
-                    .dropLast(".bootstrap".length)
-                Chain(path, chain, port)
+            "local" -> {
+                assert_(cmds.size == 2) { "invalid number of arguments" }
+                Chain(path, cmds[1], port)
                 while (true);
                 Pair(true, "")
             }
-            "init" -> {
-                assert_(cmds.size == 4)
+            "remote" -> {
+                assert_(cmds.size == 4) { "invalid number of arguments" }
                 val chain = cmds[2]
-                assert_(chain.startsWith("\$bootstrap."))
+                assert_(chain.startsWith("\$bootstrap.")) { "invalid chain name" }
                 main_cli(arrayOf(port_, "chains", "join", chain, cmds[3]))
                 Chain(path, chain, port)
                 main_cli_assert(arrayOf(port_, "peer", cmds[1], "recv", chain))

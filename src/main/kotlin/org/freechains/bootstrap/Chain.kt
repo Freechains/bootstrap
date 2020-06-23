@@ -27,7 +27,6 @@ fun String.jsonToStore (): Store {
 class Chain (root: String, chain: String, port: Int = PORT_8330) {
     val cbs: MutableSet<(Store)->Unit> = mutableSetOf()
 
-    private var work  = Pair(false,false)   // working, doagain
     private val path  = root + "/" + chain + ".bootstrap"
     private val chain = chain
     private val port_ = "--port=$port"
@@ -54,28 +53,13 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
     }
 
     @Synchronized
-    fun write (f: (Store)->Unit) {
-        f(this.store)
-        val json = this.toJson()
-        thread {
-            main_cli_assert(arrayOf(port_, "chain", this.chain, "post", "inline", json))
-        }
-    }
-
-    @Synchronized
     fun <T> read (f: (Store)->T) : T {
         return f(this.store)
     }
 
-    // read bootstrap chain, update store, join chains, notify listeners
+    // read bootstrap chain, update store, join chains, notify listeners, synchronize with the world
+    @Synchronized
     fun update () {
-        synchronized (this) {
-            if (this.work.first) {
-                this.work = Pair(true,true)
-                return
-            }
-        }
-
         // get last head
         val head = main_cli_assert(arrayOf(port_, "chain", chain, "heads", "all"))
         assert_(!head.contains(' ')) { "multiple heads" }
@@ -85,7 +69,26 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
             if (head.startsWith("0_")) {
                 Store(mutableListOf(), mutableListOf())
             } else {
-                main_cli_assert(arrayOf(port_, "chain", chain, "get", "payload", head)).jsonToStore()
+                val v = main_cli_assert(arrayOf(port_, "chain", chain, "get", "payload", head))
+                if (v.startsWith('{')) {
+                    v.jsonToStore()
+                } else {
+                    val cmd = v.split(' ')
+                    when {
+                        (cmd[0] == "peers") -> when {
+                            (cmd[1] == "add") -> this.store.peers.add(cmd[2])
+                            //(cmd[2] == "rem") -> store.chains.add(Pair(cmd[2], if (cmd.size==4) cmd[3] else null))
+                            else -> error("invalid command")
+                        }
+                        (cmd[0] == "chains") -> when {
+                            (cmd[1] == "add") -> this.store.chains.add(Pair(cmd[2], if (cmd.size==4) cmd[3] else null))
+                            //(cmd[2] == "rem") -> store.chains.add(Pair(cmd[2], if (cmd.size==4) cmd[3] else null))
+                            else -> error("invalid command")
+                        }
+                        else -> error("invalid command")
+                    }
+                    this.store
+                }
             }
 
         // join all chains
@@ -101,14 +104,11 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
             }
             .forEach { it.join() }
 
-        // save store and notify listeners
-        synchronized (this) {
-            this.store = store
-            File(this.path).writeText(this.toJson())
-            this.cbs.forEach { it(this.store) }
-        }
+        this.store = store
+        File(this.path).writeText(this.toJson())
+        this.cbs.forEach { it(this.store) }
 
-        // sync
+        // sync in parallel to accept new updates
         thread {
             // each action in sequence (receive then send)
             for (action in arrayOf("recv","send")) {
@@ -125,14 +125,5 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
                 Thread.sleep(T5S_socket*3/2)
             }
         }
-
-        synchronized (this) {
-            val repeat = this.work.second
-            this.work = Pair(false,false)
-            if (repeat) {
-                return this.update()
-            }
-        }
-
     }
 }

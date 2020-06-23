@@ -24,18 +24,13 @@ fun String.jsonToStore (): Store {
     return Json(JsonConfiguration(prettyPrint=true)).parse(Store.serializer(), this)
 }
 
-class Chain (root: String, chain: String, port: Int = PORT_8330) {
+class Chain (chain: String, port: Int = PORT_8330) {
     val cbs: MutableSet<(Store)->Unit> = mutableSetOf()
 
-    private val path  = root + "/" + chain + ".bootstrap"
+    private var last: String? = null
     private val chain = chain
     private val port_ = "--port=$port"
-    private var store = Store(mutableListOf(), mutableListOf())
-
-    private fun toJson (): String {
-        @OptIn(UnstableDefault::class)
-        return Json(JsonConfiguration(prettyPrint=true)).stringify(Store.serializer(), this.store)
-    }
+    private val store = Store(mutableListOf(), mutableListOf())
 
     init {
         assert(chain.startsWith("\$bootstrap."))
@@ -60,42 +55,38 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
     // read bootstrap chain, update store, join chains, notify listeners, synchronize with the world
     @Synchronized
     fun update () {
-        // get last head
-        val head = main_cli_assert(arrayOf(port_, "chain", chain, "heads", "all"))
-        assert_(!head.contains(' ')) { "multiple heads" }
+        if (this.last == null) {
+            this.last = main_cli_assert(arrayOf(port_, "chain", chain, "genesis"))
+        }
 
-        // get last store
-        val store =
-            if (head.startsWith("0_")) {
-                Store(mutableListOf(), mutableListOf())
-            } else {
-                val v = main_cli_assert(arrayOf(port_, "chain", chain, "get", "payload", head))
-                if (v.startsWith('{')) {
-                    v.jsonToStore()
-                } else {
-                    val cmd = v.split(' ')
-                    when {
-                        (cmd[0] == "peers") -> when {
-                            (cmd[1] == "add") -> this.store.peers.add(cmd[2])
-                            //(cmd[2] == "rem") -> store.chains.add(Pair(cmd[2], if (cmd.size==4) cmd[3] else null))
-                            else -> error("invalid command")
-                        }
-                        (cmd[0] == "chains") -> when {
-                            (cmd[1] == "add") -> this.store.chains.add(Pair(cmd[2], if (cmd.size==4) cmd[3] else null))
-                            //(cmd[2] == "rem") -> store.chains.add(Pair(cmd[2], if (cmd.size==4) cmd[3] else null))
-                            else -> error("invalid command")
-                        }
-                        else -> error("invalid command")
-                    }
-                    this.store
+        val hs = main_cli_assert(arrayOf(port_, "chain", chain, "traverse", "all", this.last!!)).listSplit()
+        for (h in hs) {
+            val v = main_cli_assert(arrayOf(port_, "chain", chain, "get", "payload", h))
+            println(">>> $v")
+            val cmd = v.split(' ')
+            when {
+                (cmd[0] == "peers") -> when {
+                    (cmd[1] == "add") -> this.store.peers.add(cmd[2])
+                    (cmd[2] == "rem") -> TODO()
+                    else -> error("invalid command")
                 }
+                (cmd[0] == "chains") -> when {
+                    (cmd[1] == "add") -> this.store.chains.add(Pair(cmd[2], if (cmd.size==4) cmd[3] else null))
+                    (cmd[2] == "rem") -> TODO()
+                    else -> error("invalid command")
+                }
+                else -> error("invalid command")
             }
+        }
+        if (hs.isNotEmpty()) {
+            this.last = hs.last()
+        }
 
         // join all chains
-        store.chains
+        this.store.chains
             .map {
                 thread {
-                    //println(">>> JOIN: ${it.first}")
+                    println(">>> JOIN: ${it.first}")
                     main_cli (
                         arrayOf(port_, "chains", "join", it.first)
                             .plus (if (it.second==null) emptyArray() else arrayOf(it.second!!))
@@ -104,8 +95,6 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
             }
             .forEach { it.join() }
 
-        this.store = store
-        File(this.path).writeText(this.toJson())
         this.cbs.forEach { it(this.store) }
 
         // sync in parallel to accept new updates
@@ -113,9 +102,9 @@ class Chain (root: String, chain: String, port: Int = PORT_8330) {
             // each action in sequence (receive then send)
             for (action in arrayOf("recv","send")) {
                 // all peers in parallel
-                for (peer in store.peers) {
+                for (peer in this.store.peers) {
                     thread {
-                        for (chain in store.chains) {
+                        for (chain in this.store.chains) {
                             //println(">>> $action ${chain.first} $port_->$peer")
                             main_cli(arrayOf(port_, "peer", peer, action, chain.first))
                         }

@@ -9,7 +9,6 @@ import kotlinx.serialization.json.JsonConfiguration
 import org.freechains.cli.main_cli
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.io.File
 import java.net.Socket
 import kotlin.concurrent.thread
 
@@ -25,8 +24,6 @@ fun String.jsonToStore (): Store {
 }
 
 class Chain (chain: String, port: Int = PORT_8330) {
-    val cbs: MutableSet<(Store)->Unit> = mutableSetOf()
-
     private var last: String? = null
     private val chain = chain
     private val port_ = "--port=$port"
@@ -34,15 +31,25 @@ class Chain (chain: String, port: Int = PORT_8330) {
 
     init {
         assert(chain.startsWith("\$bootstrap."))
-        thread { this.update() }
+        thread { this.boot() ; this.sync(null) }
         thread {
             val socket = Socket("localhost", port)
             val writer = DataOutputStream(socket.getOutputStream()!!)
             val reader = DataInputStream(socket.getInputStream()!!)
-            writer.writeLineX("$PRE chain $chain listen")
+            writer.writeLineX("$PRE chains listen")
             while (true) {
-                reader.readLineX()
-                thread { this.update() }
+                val (_,name) = reader.readLineX().listSplit()
+                println(">>> $name")
+                thread {
+                    if (name == this.chain) {
+                        println(">>> boot $name")
+                        this.boot()
+                        this.sync(null)
+                    } else {
+                        println(">>> sync $name")
+                        this.sync(name)
+                    }
+                }
             }
         }
     }
@@ -52,17 +59,39 @@ class Chain (chain: String, port: Int = PORT_8330) {
         return f(this.store)
     }
 
-    // read bootstrap chain, update store, join chains, notify listeners, synchronize with the world
-    @Synchronized
-    fun update () {
-        if (this.last == null) {
-            this.last = main_cli_assert(arrayOf(port_, "chain", chain, "genesis"))
+    fun sync (chain: String?) {
+        val (peers,chains) = this.read {
+            Pair(it.peers, if (chain == null) it.chains.map { it.first } else listOf(chain))
         }
 
-        val hs = main_cli_assert(arrayOf(port_, "chain", chain, "traverse", "all", this.last!!)).listSplit()
+        // each action in sequence (receive then send)
+        for (action in arrayOf("recv", "send")) {
+            // all peers in parallel
+            for (peer in peers) {
+                thread {
+                    for (c in chains) {
+                        //println(">>> $action ${chain.first} $port_->$peer")
+                        main_cli(arrayOf(port_, "peer", peer, action, c))
+                    }
+                }
+            }
+            // wait socket timeout to go to next action
+            Thread.sleep(T5S_socket * 3 / 2)
+        }
+    }
+
+    // read bootstrap chain, update store, join chains, notify listeners, synchronize with the world
+    @Synchronized
+    fun boot () {
+        println(">>> last = $last")
+        if (this.last == null) {
+            this.last = main_cli_assert(arrayOf(port_, "chain", this.chain, "genesis"))
+        }
+
+        val hs = main_cli_assert(arrayOf(port_, "chain", this.chain, "traverse", "all", this.last!!)).listSplit()
         for (h in hs) {
-            val v = main_cli_assert(arrayOf(port_, "chain", chain, "get", "payload", h))
-            println(">>> $v")
+            val v = main_cli_assert(arrayOf(port_, "chain", this.chain, "get", "payload", h))
+            println(">>> v = $v")
             val cmd = v.split(' ')
             when {
                 (cmd[0] == "peers") -> when {
@@ -94,25 +123,5 @@ class Chain (chain: String, port: Int = PORT_8330) {
                 }
             }
             .forEach { it.join() }
-
-        this.cbs.forEach { it(this.store) }
-
-        // sync in parallel to accept new updates
-        thread {
-            // each action in sequence (receive then send)
-            for (action in arrayOf("recv","send")) {
-                // all peers in parallel
-                for (peer in this.store.peers) {
-                    thread {
-                        for (chain in this.store.chains) {
-                            //println(">>> $action ${chain.first} $port_->$peer")
-                            main_cli(arrayOf(port_, "peer", peer, action, chain.first))
-                        }
-                    }
-                }
-                // wait socket timeout to go to next action
-                Thread.sleep(T5S_socket*3/2)
-            }
-        }
     }
 }

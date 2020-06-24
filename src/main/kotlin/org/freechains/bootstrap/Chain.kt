@@ -12,22 +12,13 @@ import java.io.DataOutputStream
 import java.net.Socket
 import kotlin.concurrent.thread
 
-@Serializable
-data class Store (
-    val peers  : MutableList<String>,
-    val chains : MutableList<Pair<String,HKey?>>
-)
-
-fun String.jsonToStore (): Store {
-    @OptIn(UnstableDefault::class)
-    return Json(JsonConfiguration(prettyPrint=true)).parse(Store.serializer(), this)
-}
-
 class Chain (chain: String, port: Int = PORT_8330) {
     private var last: String? = null
     private val chain = chain
     private val port_ = "--port=$port"
-    private val store = Store(mutableListOf(), mutableListOf())
+
+    @get:Synchronized
+    public val peers : MutableList<String> = mutableListOf()
 
     init {
         assert(chain.startsWith("\$bootstrap."))
@@ -54,15 +45,14 @@ class Chain (chain: String, port: Int = PORT_8330) {
         }
     }
 
-    @Synchronized
-    fun <T> read (f: (Store)->T) : T {
-        return f(this.store)
-    }
-
     fun sync (chain: String?) {
-        val (peers,chains) = this.read {
-            Pair(it.peers, if (chain == null) it.chains.map { it.first } else listOf(chain))
-        }
+        val chains=
+            if (chain != null) {
+                listOf(chain)
+            } else {
+                main_cli_assert(arrayOf(port_, "chains", "list")).listSplit()
+            }
+        val peers = synchronized (this) { this.peers.toTypedArray() }
 
         // each action in sequence (receive then send)
         for (action in arrayOf("recv", "send")) {
@@ -70,7 +60,7 @@ class Chain (chain: String, port: Int = PORT_8330) {
             for (peer in peers) {
                 thread {
                     for (c in chains) {
-                        //println(">>> $action ${chain.first} $port_->$peer")
+                        println("-=-=-=- $action $c $port_->$peer")
                         main_cli(arrayOf(port_, "peer", peer, action, c))
                     }
                 }
@@ -95,12 +85,19 @@ class Chain (chain: String, port: Int = PORT_8330) {
             val cmd = v.split(' ')
             when {
                 (cmd[0] == "peers") -> when {
-                    (cmd[1] == "add") -> this.store.peers.add(cmd[2])
+                    (cmd[1] == "add") -> this.peers.add(cmd[2])
                     (cmd[2] == "rem") -> TODO()
                     else -> error("invalid command")
                 }
                 (cmd[0] == "chains") -> when {
-                    (cmd[1] == "add") -> this.store.chains.add(Pair(cmd[2], if (cmd.size==4) cmd[3] else null))
+                    (cmd[1] == "add") -> {
+                        println("-=-=-=- [$port_] JOIN: ${cmd[2]}")
+                        if (cmd.size == 4) {
+                            main_cli(arrayOf(port_, "chains", "join", cmd[2], cmd[3]))
+                        } else {
+                            main_cli (arrayOf(port_, "chains", "join", cmd[2]))
+                        }
+                    }
                     (cmd[2] == "rem") -> TODO()
                     else -> error("invalid command")
                 }
@@ -110,18 +107,5 @@ class Chain (chain: String, port: Int = PORT_8330) {
         if (hs.isNotEmpty()) {
             this.last = hs.last()
         }
-
-        // join all chains
-        this.store.chains
-            .map {
-                thread {
-                    println(">>> JOIN: ${it.first}")
-                    main_cli (
-                        arrayOf(port_, "chains", "join", it.first)
-                            .plus (if (it.second==null) emptyArray() else arrayOf(it.second!!))
-                    )
-                }
-            }
-            .forEach { it.join() }
     }
 }

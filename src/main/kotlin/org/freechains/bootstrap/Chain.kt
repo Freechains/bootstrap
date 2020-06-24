@@ -30,14 +30,14 @@ class Chain (chain: String, port: Int = PORT_8330) {
             writer.writeLineX("$PRE chains listen")
             while (true) {
                 val (_,name) = reader.readLineX().listSplit()
-                println(">>> $name")
+                //println(">>> $name")
                 thread {
                     if (name == this.chain) {
-                        println(">>> boot $name")
+                        //println(">>> boot $name")
                         this.boot()
                         this.sync(null)
                     } else {
-                        println(">>> sync $name")
+                        //println(">>> sync $name")
                         this.sync(name)
                     }
                 }
@@ -60,7 +60,7 @@ class Chain (chain: String, port: Int = PORT_8330) {
             for (peer in peers) {
                 thread {
                     for (c in chains) {
-                        println("-=-=-=- $action $c $port_->$peer")
+                        //println("-=-=-=- $action $c $port_->$peer")
                         main_cli(arrayOf(port_, "peer", peer, action, c))
                     }
                 }
@@ -81,24 +81,24 @@ class Chain (chain: String, port: Int = PORT_8330) {
         val hs = main_cli_assert(arrayOf(port_, "chain", this.chain, "traverse", "all", this.last!!)).listSplit()
         for (h in hs) {
             val v = main_cli_assert(arrayOf(port_, "chain", this.chain, "get", "payload", h))
-            println(">>> v = $v")
+            //println(">>> v = $v")
             val cmd = v.split(' ')
             when {
                 (cmd[0] == "peers") -> when {
                     (cmd[1] == "add") -> this.peers.add(cmd[2])
-                    (cmd[2] == "rem") -> TODO()
+                    (cmd[1] == "rem") -> this.peers.remove(cmd[2])
                     else -> error("invalid command")
                 }
                 (cmd[0] == "chains") -> when {
                     (cmd[1] == "add") -> {
-                        println("-=-=-=- [$port_] JOIN: ${cmd[2]}")
+                        //println("-=-=-=- [$port_] JOIN: ${cmd[2]}")
                         if (cmd.size == 4) {
                             main_cli(arrayOf(port_, "chains", "join", cmd[2], cmd[3]))
                         } else {
-                            main_cli (arrayOf(port_, "chains", "join", cmd[2]))
+                            main_cli(arrayOf(port_, "chains", "join", cmd[2]))
                         }
                     }
-                    (cmd[2] == "rem") -> TODO()
+                    (cmd[1] == "rem") -> main_cli(arrayOf(port_, "chains", "leave", cmd[2]))
                     else -> error("invalid command")
                 }
                 else -> error("invalid command")

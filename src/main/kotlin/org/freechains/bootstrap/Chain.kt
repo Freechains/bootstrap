@@ -73,7 +73,7 @@ class Chain (chain: String, port: Int = PORT_8330) {
     // read bootstrap chain, update store, join chains, notify listeners, synchronize with the world
     @Synchronized
     fun boot () {
-        println(">>> last = $last")
+        //println(">>> last = $last")
         if (this.last == null) {
             this.last = main_cli_assert(arrayOf(port_, "chain", this.chain, "genesis"))
         }

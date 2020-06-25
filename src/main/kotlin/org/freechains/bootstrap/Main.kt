@@ -12,8 +12,7 @@ val help = """
 freechains-bootstrap $VERSION
 
 Usage:
-    freechains-bootstrap local <chain>
-    freechains-bootstrap remote <peer> <chain>
+    freechains-bootstrap <chain>
 
 Options:
     --help          displays this help
@@ -38,26 +37,11 @@ fun main_bootstrap_assert (args: Array<String>) : String {
 fun main_bootstrap (args: Array<String>) : Pair<Boolean,String> {
     return main_catch_("freechains-bootstrap", VERSION, help, args) { cmds, opts ->
         val port = opts["--port"]?.toInt() ?: PORT_8330
-        val port_ = "--port=$port"
 
+        assert_(cmds.size == 1) { "invalid number of arguments" }
+        Chain(cmds[0], port)
+        while (true);
         @Suppress("UNREACHABLE_CODE")
-        when (cmds[0]) {
-            "local" -> {
-                assert_(cmds.size == 2) { "invalid number of arguments" }
-                Chain(cmds[1], port)
-                while (true);
-                Pair(true, "")
-            }
-            "remote" -> {
-                assert_(cmds.size == 3) { "invalid number of arguments" }
-                val chain = cmds[2]
-                assert_(chain.startsWith("\$bootstrap.")) { "invalid chain name" }
-                Chain(chain, port)
-                main_cli_assert(arrayOf(port_, "peer", cmds[1], "recv", chain))
-                while (true);
-                Pair(true, "")
-            }
-            else -> Pair(false, "!")
-        }
+        Pair(true, "")
     }
 }

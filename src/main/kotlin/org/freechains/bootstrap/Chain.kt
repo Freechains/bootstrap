@@ -2,10 +2,6 @@ package org.freechains.bootstrap
 
 import org.freechains.common.*
 import org.freechains.cli.main_cli_assert
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.UnstableDefault
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonConfiguration
 import org.freechains.cli.main_cli
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -22,7 +18,7 @@ class Chain (chain: String, port: Int = PORT_8330) {
 
     init {
         assert(chain.startsWith("\$bootstrap."))
-        thread { this.boot() ; this.sync(null) }
+        thread { this.cmds() ; this.sync(null) }
         thread {
             val socket = Socket("localhost", port)
             val writer = DataOutputStream(socket.getOutputStream()!!)
@@ -34,7 +30,7 @@ class Chain (chain: String, port: Int = PORT_8330) {
                 thread {
                     if (name == this.chain) {
                         //println(">>> boot $name")
-                        this.boot()
+                        this.cmds()
                         this.sync(null)
                     } else {
                         //println(">>> sync $name")
@@ -45,7 +41,7 @@ class Chain (chain: String, port: Int = PORT_8330) {
         }
     }
 
-    fun sync (chain: String?) {
+    private fun sync (chain: String?) {
         val chains=
             if (chain != null) {
                 listOf(chain)
@@ -72,7 +68,7 @@ class Chain (chain: String, port: Int = PORT_8330) {
 
     // read bootstrap chain, update store, join chains, notify listeners, synchronize with the world
     @Synchronized
-    fun boot () {
+    private fun cmds () {
         //println(">>> last = $last")
         if (this.last == null) {
             this.last = main_cli_assert(arrayOf(port_, "chain", this.chain, "genesis"))

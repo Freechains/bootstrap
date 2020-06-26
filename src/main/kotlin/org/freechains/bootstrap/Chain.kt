@@ -17,7 +17,7 @@ class Chain (chain: String, port: Int = PORT_8330) {
     public val peers : MutableList<String> = mutableListOf()
 
     init {
-        assert(chain.startsWith("\$bootstrap."))
+        //assert(chain.startsWith("\$bootstrap."))
         thread { this.cmds() ; this.sync(null) }
         thread {
             val socket = Socket("localhost", port)

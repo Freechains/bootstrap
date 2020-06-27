@@ -8,10 +8,22 @@ import java.io.DataOutputStream
 import java.net.Socket
 import kotlin.concurrent.thread
 
-class Chain (chain: String, port: Int = PORT_8330) {
+fun CB_START (x: Int) {}
+fun CB_ITEM  (x: String, y: String, z: Pair<Boolean,String>) {}
+fun CB_END   () {}
+
+class Chain (chain: String, port: Int,
+             cb_start: (Int)->Unit = ::CB_START,
+             cb_item:  (String,String,Pair<Boolean,String>)->Unit = ::CB_ITEM,
+             cb_end:   ()->Unit = ::CB_END)
+{
     private var last: String? = null
     private val chain = chain
     private val port_ = "--port=$port"
+
+    private val cb_start = cb_start
+    private val cb_item  = cb_item
+    private val cb_end   = cb_end
 
     @get:Synchronized
     public val peers : MutableList<String> = mutableListOf()
@@ -51,19 +63,22 @@ class Chain (chain: String, port: Int = PORT_8330) {
         val peers = synchronized (this) { this.peers.toTypedArray() }
 
         // each action in sequence (receive then send)
+        this.cb_start(chains.size * peers.size * 2)
         for (action in arrayOf("recv", "send")) {
             // all peers in parallel
             for (peer in peers) {
                 thread {
                     for (c in chains) {
                         //println("-=-=-=- $action $c $port_->$peer")
-                        main_cli(arrayOf(port_, "peer", peer, action, c))
+                        val ret = main_cli(arrayOf(port_, "peer", peer, action, c))
+                        this.cb_item(c,action,ret)
                     }
                 }
             }
             // wait socket timeout to go to next action
             Thread.sleep(T5S_socket * 3 / 2)
         }
+        this.cb_end()
     }
 
     // read bootstrap chain, update store, join chains, notify listeners, synchronize with the world

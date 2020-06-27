@@ -1,12 +1,6 @@
 package org.freechains.bootstrap
 
-import org.freechains.cli.main_cli
-import org.freechains.cli.main_cli_assert
 import org.freechains.common.*
-import org.freechains.host.main_host
-import org.freechains.host.main_host_assert
-import java.io.File
-import kotlin.system.exitProcess
 
 val help = """
 freechains-bootstrap $VERSION
